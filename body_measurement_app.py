@@ -233,8 +233,15 @@ def timer_camera_input(label, seconds, key):
 # whatever you push to GitHub for Streamlit Community Cloud. If a file is
 # missing, we just skip showing that image instead of raising an error, since
 # the app is still fully usable without the instruction graphics.
-_INSTRUCTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instructions")
-POSTURE_REFERENCE_IMG = os.path.join(_INSTRUCTIONS_DIR, "posture_reference.jpge")
+_INSTRUCTIONS_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "instructions"
+)
+
+POSTURE_REFERENCE_IMG = os.path.join(
+    _INSTRUCTIONS_DIR,
+    "posture_reference.jpeg"
+)
 
 
 def show_instruction_images():
@@ -244,12 +251,9 @@ def show_instruction_images():
             POSTURE_REFERENCE_IMG,
             use_container_width=True
         )
-def show_instruction_images():
-    """Show only the main front/side posture instruction image."""
-    if os.path.exists(POSTURE_REFERENCE_IMG):
-        st.image(
-            POSTURE_REFERENCE_IMG,
-            use_container_width=True
+    else:
+        st.warning(
+            f"Instruction image not found: {POSTURE_REFERENCE_IMG}"
         )
 
 # ============================================================
