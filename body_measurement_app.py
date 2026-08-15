@@ -28,6 +28,13 @@ WHAT'S NEW IN v6 (added on top of v5 - nothing below was removed or rewritten):
    The capture-instructions and posture-reference graphics are now displayed as
    images at the top of the Measurements page (loaded from the instructions/
    folder shipped next to this file), in addition to the existing text.
+6. REORDERED SETTINGS + FEEDBACK SECTION
+   "Height input unit" now sits directly above the height entry field instead
+   of in a separate row above it. "Show results in" moved from the top of the
+   page down to sit right above the "Estimated Measurements" results, since it
+   only affects how results are displayed, not the photo-capture flow. A new
+   feedback section (star rating + comments) was added at the bottom of the
+   Measurements page, kept in-session only (see the honesty note in the code).
 
 WHAT WAS ALREADY IN v5 (unchanged, still true):
 1. CUSTOM CAMERA COMPONENT WITH A COUNTDOWN TIMER (replaces st.camera_input)
@@ -106,7 +113,7 @@ import streamlit.components.v1 as components
 import mediapipe as mp
 from PIL import Image
 
-st.set_page_config(page_title="SmartMeasure", page_icon="📏", layout="wide")
+st.set_page_config(page_title="AI Body Measurement", page_icon="📏", layout="wide")
 
 # ============================================================
 # PASTEL UI STYLING (unchanged from v3)
@@ -233,28 +240,23 @@ def timer_camera_input(label, seconds, key):
 # whatever you push to GitHub for Streamlit Community Cloud. If a file is
 # missing, we just skip showing that image instead of raising an error, since
 # the app is still fully usable without the instruction graphics.
-_INSTRUCTIONS_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "instructions"
-)
-
-POSTURE_REFERENCE_IMG = os.path.join(
-    _INSTRUCTIONS_DIR,
-    "posture_reference.jpeg"
-)
+_INSTRUCTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instructions")
+CAPTURE_INSTRUCTIONS_IMG = os.path.join(_INSTRUCTIONS_DIR, "capture_instructions.jpg")
+POSTURE_REFERENCE_IMG = os.path.join(_INSTRUCTIONS_DIR, "posture_reference.jpg")
 
 
 def show_instruction_images():
-    """Show only the main front/side posture instruction image."""
-    if os.path.exists(POSTURE_REFERENCE_IMG):
-        st.image(
-            POSTURE_REFERENCE_IMG,
-            use_container_width=True
-        )
-    else:
-        st.warning(
-            f"Instruction image not found: {POSTURE_REFERENCE_IMG}"
-        )
+    """Shows the capture-instructions and posture-reference graphics at the top
+    of the Measurements page. Silently skipped if the files aren't found, so a
+    missing instructions/ folder can never break the app."""
+    imgs = [p for p in (CAPTURE_INSTRUCTIONS_IMG, POSTURE_REFERENCE_IMG) if os.path.exists(p)]
+    if not imgs:
+        return
+    cols = st.columns(len(imgs))
+    for col, path in zip(cols, imgs):
+        with col:
+            st.image(path, use_container_width=True)
+
 
 # ============================================================
 # NEW IN v6: CROP STEP FOR EVERY PHOTO
@@ -272,11 +274,11 @@ def crop_controls(image, key_prefix):
     )
     c1, c2 = st.columns(2)
     with c1:
-        top_pct = st.slider("Trim top (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_top")
-        bottom_pct = st.slider("Trim bottom (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_bottom")
+        top_pct = st.slider("Trim top (%)", 0, 40, 0, key=f"{key_prefix}_crop_top")
+        bottom_pct = st.slider("Trim bottom (%)", 0, 40, 0, key=f"{key_prefix}_crop_bottom")
     with c2:
-        left_pct = st.slider("Trim left (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_left")
-        right_pct = st.slider("Trim right (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_right")
+        left_pct = st.slider("Trim left (%)", 0, 40, 0, key=f"{key_prefix}_crop_left")
+        right_pct = st.slider("Trim right (%)", 0, 40, 0, key=f"{key_prefix}_crop_right")
 
     left = int(w * left_pct / 100)
     right = int(w * (1 - right_pct / 100))
@@ -322,6 +324,48 @@ def capture_crop_and_confirm(label, seconds, slot_key, final_state_key):
             st.session_state[raw_key] = None
             st.rerun()
     return False
+
+
+# ============================================================
+# NEW IN v6: FEEDBACK SECTION
+# ============================================================
+def show_feedback_section():
+    """Renders a simple star-rating + comments feedback form at the bottom of
+    the Measurements page. Feedback is kept in st.session_state for this
+    session only - there's no backend/database wired up yet, so it isn't sent
+    anywhere or saved between sessions. This mirrors the same honesty pattern
+    already used for the notifications toggle on the Home page."""
+    st.subheader("💬 Feedback")
+    st.caption("Tell us how the measurements and the overall app experience felt.")
+
+    rating = st.select_slider(
+        "How accurate did the results feel?",
+        options=["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
+        value="⭐⭐⭐",
+        key="feedback_rating",
+    )
+    comments = st.text_area(
+        "Anything that felt off, or any suggestions?",
+        placeholder="e.g. the waist number seemed a little large, or the crop step was handy...",
+        key="feedback_comments",
+    )
+
+    if st.button("Submit feedback", key="submit_feedback"):
+        st.session_state.feedback_log.append({"rating": rating, "comments": comments.strip()})
+        st.success("✅ Thanks for the feedback!")
+
+    st.markdown(
+        """<div class="info-box">ℹ️ Feedback is only kept for this session right now — no
+        backend/database is connected yet, so it isn't saved once you close the app. To make
+        this persist, a small database (e.g. SQLite, Google Sheets, or Firebase) would need
+        to be wired up.</div>""",
+        unsafe_allow_html=True,
+    )
+
+    if st.session_state.feedback_log:
+        with st.expander(f"This session's feedback ({len(st.session_state.feedback_log)})", expanded=False):
+            for i, entry in enumerate(st.session_state.feedback_log, 1):
+                st.markdown(f"**{i}. {entry['rating']}** — {entry['comments'] or '_(no comment)_'}")
 
 
 # ============================================================
@@ -460,6 +504,7 @@ def init_state():
         "use_back_view": False,
         "otp_is_real": False,
         "otp_send_error": None,
+        "feedback_log": [],
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -955,26 +1000,26 @@ def page_home():
 def page_measurements():
     st.title("📐 Measurements")
 
-    st.markdown(
-            "**Instructions:** follow as in the below shown images."
-    )
     # NEW in v6: instruction graphics shown at the top of the page
     show_instruction_images()
 
-   
+    st.markdown(
+        "**Instructions:** Stand straight facing the camera for the front photo, "
+        "arms slightly away from your body, full body visible (head to feet, with a little "
+        "margin), plain background, good lighting, camera held level at chest height "
+        "(about 4.5 ft), about **10 feet (~3 meters) back**. For the side photo, turn 90° "
+        "and stand the same 10 feet from the camera - keep a small gap between your arm and "
+        "your torso (rest your hand slightly forward or bend the elbow a touch) so your arm "
+        "doesn't overlap your torso outline. For the optional back photo, turn all the way "
+        "around (back to the camera), same distance, arms slightly away from your body."
+    )
 
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        gender = st.radio(
-            "Measuring for", ["Women", "Men"],
-            index=0 if st.session_state.gender == "Women" else 1,
-            horizontal=True,
-        )
-        st.session_state.gender = gender
-    with col_b:
-        height_unit = st.radio("Height input unit", ["cm", "feet & inches"], horizontal=True)
-    with col_c:
-        display_unit = st.radio("Show results in", ["cm", "inches"], horizontal=True)
+    gender = st.radio(
+        "Measuring for", ["Women", "Men"],
+        index=0 if st.session_state.gender == "Women" else 1,
+        horizontal=True,
+    )
+    st.session_state.gender = gender
 
     st.markdown(
         """<div class="info-box">📏 <b>For accurate results, always type your real height
@@ -983,6 +1028,7 @@ def page_measurements():
         unsafe_allow_html=True,
     )
 
+    height_unit = st.radio("Height input unit", ["cm", "feet & inches"], horizontal=True)
     if height_unit == "cm":
         height_cm = st.number_input("Enter your actual height (cm)", min_value=100.0, max_value=220.0, value=165.0, step=0.5)
     else:
@@ -1352,6 +1398,7 @@ def page_measurements():
     # Display results
     # ------------------------------------------------------
     st.subheader("📐 Estimated Measurements")
+    display_unit = st.radio("Show results in", ["cm", "inches"], horizontal=True, key="display_unit_choice")
     u = display_unit
     label = unit_label(u)
 
@@ -1416,6 +1463,9 @@ def page_measurements():
         st.caption("📐 Height calibration: silhouette-based (v4, high consistency).")
     else:
         st.caption("📐 Height calibration: mixed/fallback method used on at least one shot — see notes above.")
+
+    st.write("---")
+    show_feedback_section()
 
 
 # ============================================================
