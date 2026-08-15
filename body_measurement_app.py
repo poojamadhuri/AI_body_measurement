@@ -234,7 +234,6 @@ def timer_camera_input(label, seconds, key):
 # missing, we just skip showing that image instead of raising an error, since
 # the app is still fully usable without the instruction graphics.
 _INSTRUCTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instructions")
-CAPTURE_INSTRUCTIONS_IMG = os.path.join(_INSTRUCTIONS_DIR, "capture_instructions.jpg")
 POSTURE_REFERENCE_IMG = os.path.join(_INSTRUCTIONS_DIR, "posture_reference.jpg")
 
 
