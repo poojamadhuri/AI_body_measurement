@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<!--
+  Custom Streamlit component: camera preview + countdown self-timer.
+
+  WHY THIS FILE EXISTS:
+  Streamlit's built-in st.camera_input has two limitations the user hit:
+    1. Each camera_input widget sizes its box independently based on the
+       webcam stream, so two side-by-side widgets can render at different
+       heights (the front box taller than the side box, as in the screenshot).
+    2. It has no self-timer - it's an instant "click and it snaps" button,
+       so there's no way to step back after clicking before the photo is taken.
+
+  This component replaces st.camera_input entirely for the measurement photos.
+  Because we render our own fixed-size video box (same width/height for every
+  instance) and add our own countdown before capture, both problems are fixed
+  by construction rather than patched with CSS.
+
+  HOW IT TALKS TO PYTHON (no npm/React build needed):
+  Streamlit's browser-side app communicates with any component iframe using
+  plain window.postMessage with a small, stable set of message types
+  (streamlit:componentReady, streamlit:render, streamlit:setComponentValue,
+  streamlit:setFrameHeight). That wire protocol is what the official
+  streamlit-component-lib JS package wraps - we implement the same handful of
+  messages by hand below so this component is just one static HTML file with
+  no build tooling required.
+-->
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .cam-wrap {
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
+    box-sizing: border-box;
+  }
+  .cam-box {
+    position: relative;
+    width: 100%;
+    /* Fixed square aspect ratio -> every instance of this component (front
+       shot 1/2/3, side shot) renders at exactly the same height. This is the
+       direct fix for the "boxes are different heights" issue. */
+    aspect-ratio: 1 / 1;
+    background: #efe6f7;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 3px 10px rgba(150,120,180,0.18);
+  }
+  video, canvas {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  canvas { display: none; }
+  .countdown-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 64px;
+    font-weight: 800;
+    color: white;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.55);
+    pointer-events: none;
+  }
+  .status {
+    font-size: 13px;
+    color: #6b5b7a;
+    margin: 8px 2px 0 2px;
+    min-height: 18px;
+  }
+  .btn-row {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+  }
+  button {
+    flex: 1;
+    background: linear-gradient(135deg, #f5a9d0, #b9a7f5);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-weight: 700;
+    padding: 10px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  button.secondary {
+    background: #e7e0f0;
+    color: #4a3f55;
+  }
+  .label {
+    font-weight: 700;
+    color: #4a3f55;
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+</style>
+</head>
+<body>
+  <div class="cam-wrap">
+    <div class="label" id="labelText">Camera</div>
+    <div class="cam-box">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div class="countdown-overlay" id="countdown"></div>
+    </div>
+    <div class="status" id="status">Requesting camera access…</div>
+    <div class="btn-row">
+      <button id="startBtn" disabled>Start timer & capture</button>
+      <button id="retakeBtn" class="secondary" style="display:none;">Retake</button>
+    </div>
+  </div>
+
+<script>
+  // ---------- Streamlit wire protocol (hand-rolled, no build step) ----------
+  function sendToStreamlit(type, payload) {
+    var msg = Object.assign({ isStreamlitMessage: true, type: type }, payload || {});
+    window.parent.postMessage(msg, "*");
+  }
+  function notifyReady() {
+    sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+  }
+  function setFrameHeight() {
+    var h = document.documentElement.scrollHeight;
+    sendToStreamlit("streamlit:setFrameHeight", { height: h });
+  }
+  function setComponentValue(value) {
+    sendToStreamlit("streamlit:setComponentValue", { value: value, dataType: "json" });
+  }
+
+  // ---------- Component state ----------
+  var videoEl = document.getElementById("video");
+  var canvasEl = document.getElementById("canvas");
+  var countdownEl = document.getElementById("countdown");
+  var statusEl = document.getElementById("status");
+  var startBtn = document.getElementById("startBtn");
+  var retakeBtn = document.getElementById("retakeBtn");
+  var labelEl = document.getElementById("labelText");
+
+  var stream = null;
+  var seconds = 3;
+  var running = false;
+  var initializedArgsKey = null;
+
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: "user" },
+        audio: false,
+      });
+      videoEl.srcObject = stream;
+      statusEl.textContent = "Camera ready. Get in position, then start the timer.";
+      startBtn.disabled = false;
+    } catch (err) {
+      statusEl.textContent = "Camera permission denied or unavailable (" + err.message + "). " +
+        "Allow camera access in your browser and reload.";
+      startBtn.disabled = true;
+    }
+    setFrameHeight();
+  }
+
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(function (t) { t.stop(); });
+      stream = null;
+    }
+  }
+
+  function capture() {
+    canvasEl.width = videoEl.videoWidth || 640;
+    canvasEl.height = videoEl.videoHeight || 640;
+    var ctx = canvasEl.getContext("2d");
+    ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+    var dataUrl = canvasEl.toDataURL("image/jpeg", 0.92);
+
+    videoEl.style.display = "none";
+    canvasEl.style.display = "block";
+    countdownEl.textContent = "";
+    statusEl.textContent = "Captured! Use Retake if you want to try again.";
+    startBtn.style.display = "none";
+    retakeBtn.style.display = "block";
+    stopCamera();
+    setFrameHeight();
+    setComponentValue(dataUrl);
+  }
+
+  async function runCountdownAndCapture() {
+    if (running) return;
+    running = true;
+    startBtn.disabled = true;
+    for (var i = seconds; i >= 1; i--) {
+      countdownEl.textContent = i;
+      statusEl.textContent = "Hold still…";
+      await new Promise(function (r) { setTimeout(r, 1000); });
+    }
+    countdownEl.textContent = "📸";
+    capture();
+    running = false;
+  }
+
+  function retake() {
+    setComponentValue(null);
+    canvasEl.style.display = "none";
+    videoEl.style.display = "block";
+    retakeBtn.style.display = "none";
+    startBtn.style.display = "block";
+    startBtn.disabled = true;
+    statusEl.textContent = "Requesting camera access…";
+    startCamera();
+  }
+
+  startBtn.addEventListener("click", function () { runCountdownAndCapture(); });
+  retakeBtn.addEventListener("click", function () { retake(); });
+
+  // ---------- Handle args coming from Python ----------
+  function onRender(event) {
+    if (!event.data || event.data.type !== "streamlit:render") return;
+    var args = event.data.args || {};
+    var label = args.label || "Camera";
+    var newSeconds = args.seconds || 3;
+    var argsKey = label + "|" + newSeconds;
+
+    labelEl.textContent = label + "  ·  " + newSeconds + "s timer";
+    seconds = newSeconds;
+
+    // Only (re)start the camera the first time this exact instance renders,
+    // so we don't interrupt an in-progress countdown on every Streamlit rerun.
+    if (initializedArgsKey === null) {
+      initializedArgsKey = argsKey;
+      startCamera();
+    }
+    setFrameHeight();
+  }
+
+  window.addEventListener("message", onRender);
+  window.addEventListener("resize", setFrameHeight);
+
+  // Explicitly release the webcam when Streamlit removes this component.
+  // This is important for sequential multi-shot capture: shot 1 must fully
+  // release the physical camera before shot 2 is mounted.
+  window.addEventListener("pagehide", stopCamera);
+
+  notifyReady();
+  setFrameHeight();
+</script>
+</body>
+</html>
