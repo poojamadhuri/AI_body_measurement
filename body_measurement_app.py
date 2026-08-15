@@ -267,11 +267,11 @@ def crop_controls(image, key_prefix):
     )
     c1, c2 = st.columns(2)
     with c1:
-        top_pct = st.slider("Trim top (%)", 0, 40, 0, key=f"{key_prefix}_crop_top")
-        bottom_pct = st.slider("Trim bottom (%)", 0, 40, 0, key=f"{key_prefix}_crop_bottom")
+        top_pct = st.slider("Trim top (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_top")
+        bottom_pct = st.slider("Trim bottom (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_bottom")
     with c2:
-        left_pct = st.slider("Trim left (%)", 0, 40, 0, key=f"{key_prefix}_crop_left")
-        right_pct = st.slider("Trim right (%)", 0, 40, 0, key=f"{key_prefix}_crop_right")
+        left_pct = st.slider("Trim left (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_left")
+        right_pct = st.slider("Trim right (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_right")
 
     left = int(w * left_pct / 100)
     right = int(w * (1 - right_pct / 100))
