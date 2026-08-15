@@ -239,16 +239,12 @@ POSTURE_REFERENCE_IMG = os.path.join(_INSTRUCTIONS_DIR, "posture_reference.jpg")
 
 
 def show_instruction_images():
-    """Shows the capture-instructions and posture-reference graphics at the top
-    of the Measurements page. Silently skipped if the files aren't found, so a
-    missing instructions/ folder can never break the app."""
-    imgs = [p for p in (CAPTURE_INSTRUCTIONS_IMG, POSTURE_REFERENCE_IMG) if os.path.exists(p)]
-    if not imgs:
-        return
-    cols = st.columns(len(imgs))
-    for col, path in zip(cols, imgs):
-        with col:
-            st.image(path, use_container_width=True)
+    """Show only the main front/side posture instruction image."""
+    if os.path.exists(POSTURE_REFERENCE_IMG):
+        st.image(
+            POSTURE_REFERENCE_IMG,
+            use_container_width=True
+        )
 
 
 # ============================================================
