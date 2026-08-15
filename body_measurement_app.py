@@ -240,23 +240,26 @@ def timer_camera_input(label, seconds, key):
 # whatever you push to GitHub for Streamlit Community Cloud. If a file is
 # missing, we just skip showing that image instead of raising an error, since
 # the app is still fully usable without the instruction graphics.
-_INSTRUCTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instructions")
-CAPTURE_INSTRUCTIONS_IMG = os.path.join(_INSTRUCTIONS_DIR, "capture_instructions.jpg")
-POSTURE_REFERENCE_IMG = os.path.join(_INSTRUCTIONS_DIR, "posture_reference.jpg")
+_INSTRUCTIONS_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "instructions"
+)
+
+POSTURE_REFERENCE_IMG = os.path.join(
+    _INSTRUCTIONS_DIR,
+    "posture_reference.jpeg"
+)
 
 
 def show_instruction_images():
-    """Shows the capture-instructions and posture-reference graphics at the top
-    of the Measurements page. Silently skipped if the files aren't found, so a
-    missing instructions/ folder can never break the app."""
-    imgs = [p for p in (CAPTURE_INSTRUCTIONS_IMG, POSTURE_REFERENCE_IMG) if os.path.exists(p)]
-    if not imgs:
-        return
-    cols = st.columns(len(imgs))
-    for col, path in zip(cols, imgs):
-        with col:
-            st.image(path, use_container_width=True)
-
+    """Show only the main front/side posture instruction image."""
+    if os.path.exists(POSTURE_REFERENCE_IMG):
+        st.image(
+            POSTURE_REFERENCE_IMG,
+            use_container_width=True
+        )
+    else:
+        st.warning(f"Image not found: {POSTURE_REFERENCE_IMG}")
 
 # ============================================================
 # NEW IN v6: CROP STEP FOR EVERY PHOTO
