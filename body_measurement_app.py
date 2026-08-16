@@ -277,11 +277,11 @@ def crop_controls(image, key_prefix):
     )
     c1, c2 = st.columns(2)
     with c1:
-        top_pct = st.slider("Trim top (%)", 0, 40, 0, key=f"{key_prefix}_crop_top")
-        bottom_pct = st.slider("Trim bottom (%)", 0, 40, 0, key=f"{key_prefix}_crop_bottom")
+        top_pct = st.slider("Trim top (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_top")
+        bottom_pct = st.slider("Trim bottom (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_bottom")
     with c2:
-        left_pct = st.slider("Trim left (%)", 0, 40, 0, key=f"{key_prefix}_crop_left")
-        right_pct = st.slider("Trim right (%)", 0, 40, 0, key=f"{key_prefix}_crop_right")
+        left_pct = st.slider("Trim left (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_left")
+        right_pct = st.slider("Trim right (%)", 0, 70, 0, step=1, key=f"{key_prefix}_crop_right")
 
     left = int(w * left_pct / 100)
     right = int(w * (1 - right_pct / 100))
@@ -1003,19 +1003,19 @@ def page_home():
 def page_measurements():
     st.title("📐 Measurements")
 
+    st.markdown(
+            "**Instructions:** Stand straight facing the camera for the front photo, "
+            "arms slightly away from your body, full body visible (head to feet, with a little "
+            "margin), plain background, good lighting, camera held level at chest height "
+            "(about 4.5 ft), about **10 feet (~3 meters) back**. For the side photo, turn 90° "
+            "and stand the same 10 feet from the camera - keep a small gap between your arm and "
+            "your torso (rest your hand slightly forward or bend the elbow a touch) so your arm "
+            "doesn't overlap your torso outline. For the optional back photo, turn all the way "
+            "around (back to the camera), same distance, arms slightly away from your body."
+    )
+
     # NEW in v6: instruction graphics shown at the top of the page
     show_instruction_images()
-
-    st.markdown(
-        "**Instructions:** Stand straight facing the camera for the front photo, "
-        "arms slightly away from your body, full body visible (head to feet, with a little "
-        "margin), plain background, good lighting, camera held level at chest height "
-        "(about 4.5 ft), about **10 feet (~3 meters) back**. For the side photo, turn 90° "
-        "and stand the same 10 feet from the camera - keep a small gap between your arm and "
-        "your torso (rest your hand slightly forward or bend the elbow a touch) so your arm "
-        "doesn't overlap your torso outline. For the optional back photo, turn all the way "
-        "around (back to the camera), same distance, arms slightly away from your body."
-    )
 
     gender = st.radio(
         "Measuring for", ["Women", "Men"],
