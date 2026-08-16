@@ -302,12 +302,41 @@ def capture_crop_and_confirm(label, seconds, slot_key, final_state_key):
     and a confirm button. Returns True once a final (cropped) image is stored
     in st.session_state[final_state_key]; returns False while still
     capturing/cropping, in which case the caller should stop rendering further
-    (same early-return pattern the rest of this page already uses)."""
+    (same early-return pattern the rest of this page already uses).
+
+    NEW: also offers "Upload from gallery" as an alternate source for this same
+    slot, using a plain st.file_uploader. This sits entirely outside the custom
+    timer_camera component (no changes to that component needed), so it can't
+    break the existing camera capture path - it just hands the app a PIL image
+    the exact same way a camera capture would, before the crop step below."""
     raw_key = f"{slot_key}_raw"
     if st.session_state.get(final_state_key) is not None:
         return True
 
     if st.session_state.get(raw_key) is None:
+        source = st.radio(
+            "Photo source",
+            ["📷 Use camera", "🖼️ Upload from gallery"],
+            horizontal=True,
+            key=f"{slot_key}_source",
+        )
+
+        if source == "🖼️ Upload from gallery":
+            uploaded = st.file_uploader(
+                f"{label} — choose a full-body photo",
+                type=["jpg", "jpeg", "png"],
+                key=f"{slot_key}_uploader",
+            )
+            if uploaded is not None:
+                try:
+                    img = Image.open(uploaded).convert("RGB")
+                except Exception:
+                    st.error("Couldn't read that image file — try a JPG or PNG.")
+                    return False
+                st.session_state[raw_key] = img
+                st.rerun()
+            return False
+
         captured = timer_camera_input(label, seconds=seconds, key=slot_key)
         if captured is not None:
             st.session_state[raw_key] = captured
@@ -783,6 +812,74 @@ def analyze_front_photo(front_bgr, height_cm):
     hip_y_norm = (l_hip.y + r_hip.y) / 2
     waist_y_norm = chest_y_norm + (hip_y_norm - chest_y_norm) * 0.6
 
+    # --------------------------------------------------------
+    # FIX: true silhouette-based front widths for chest/waist/hip
+    # --------------------------------------------------------
+    # BUG THIS FIXES: chest/waist/hip circumference used to be calculated from
+    # shoulder_width_cm / hip_width_cm above, which are landmark-to-landmark
+    # distances between MediaPipe's shoulder/hip JOINT points. Those joints sit
+    # noticeably INSIDE the body's actual outline (a few cm in from the real
+    # skin/clothing edge on each side), so every circumference computed from
+    # them was systematically too small - which is exactly what pushes a
+    # true M/L result down into the S bracket. The fix: walk out from the
+    # torso center along the segmentation mask (the same edge-walking already
+    # used for side-view depth) to find the REAL visible body width at chest,
+    # waist, and hip height, and use that for circumference instead. Falls
+    # back to the old landmark-based estimate only if the mask can't be read
+    # cleanly at that row (e.g. bad lighting/background).
+    chest_anchor_x_px = ((l_shoulder.x + r_shoulder.x) / 2) * fw
+    hip_anchor_x_px = ((l_hip.x + r_hip.x) / 2) * fw
+    waist_anchor_x_px = chest_anchor_x_px + (hip_anchor_x_px - chest_anchor_x_px) * 0.6
+
+    chest_y_px = int(chest_y_norm * fh)
+    waist_y_px = int(waist_y_norm * fh)
+    hip_y_px = int(hip_y_norm * fh)
+
+    chest_width_px = measure_torso_width_at_y(mask, chest_y_px, chest_anchor_x_px)
+    waist_width_px = measure_torso_width_at_y(mask, waist_y_px, waist_anchor_x_px)
+    hip_width_px = measure_torso_width_at_y(mask, hip_y_px, hip_anchor_x_px)
+
+    front_width_fallback_used = False
+    if chest_width_px:
+        chest_width_front_cm = chest_width_px * px_to_cm
+    else:
+        chest_width_front_cm = shoulder_width_cm
+        front_width_fallback_used = True
+
+    if waist_width_px:
+        waist_width_front_cm = waist_width_px * px_to_cm
+    else:
+        waist_width_front_cm = hip_width_cm * 0.9
+        front_width_fallback_used = True
+
+    if hip_width_px:
+        hip_width_front_cm = hip_width_px * px_to_cm
+    else:
+        hip_width_front_cm = hip_width_cm
+        front_width_fallback_used = True
+
+    if front_width_fallback_used:
+        issues.append(
+            "Couldn't read a clean body outline at chest/waist/hip height on this "
+            "photo, so a less precise backup width estimate was used there - a "
+            "plain, well-lit background improves this."
+        )
+
+    # Front-view arms hanging flush against the torso can get merged into the
+    # waist/hip width reading (same issue already flagged for the side photo).
+    front_arm_overlap_warning = False
+    arm_y_positions = [l_elbow.y, r_elbow.y, l_wrist.y, r_wrist.y]
+    for target_y in (waist_y_norm, hip_y_norm):
+        if any(abs(ay - target_y) < 0.03 for ay in arm_y_positions):
+            front_arm_overlap_warning = True
+            break
+    if front_arm_overlap_warning:
+        issues.append(
+            "Your arms look close to your torso at waist/hip height. Stand with a "
+            "small gap between your arms and your sides for the most accurate "
+            "waist/hip width."
+        )
+
     return {
         "error": None,
         "landmarks": landmarks,
@@ -795,6 +892,9 @@ def analyze_front_photo(front_bgr, height_cm):
         "calibration_method": calibration_method,
         "shoulder_width_cm": shoulder_width_cm,
         "hip_width_cm": hip_width_cm,
+        "chest_width_front_cm": chest_width_front_cm,
+        "waist_width_front_cm": waist_width_front_cm,
+        "hip_width_front_cm": hip_width_front_cm,
         "arm_length_cm": arm_length_cm,
         "leg_length_cm": leg_length_cm,
         "chest_y_norm": chest_y_norm,
@@ -1237,16 +1337,25 @@ def page_measurements():
     # ------------------------------------------------------
     shoulder_vals = [r["shoulder_width_cm"] for r in shot_results]
     hip_vals = [r["hip_width_cm"] for r in shot_results]
+    chest_width_front_vals = [r["chest_width_front_cm"] for r in shot_results]
+    waist_width_front_vals = [r["waist_width_front_cm"] for r in shot_results]
+    hip_width_front_vals = [r["hip_width_front_cm"] for r in shot_results]
     if back_result is not None:
         # Extra data points from the back photo, folded into the same
         # consistency-averaged figures used for the front-only case.
         shoulder_vals.append(back_result["shoulder_width_cm"])
         hip_vals.append(back_result["hip_width_cm"])
+        chest_width_front_vals.append(back_result["chest_width_front_cm"])
+        waist_width_front_vals.append(back_result["waist_width_front_cm"])
+        hip_width_front_vals.append(back_result["hip_width_front_cm"])
     arm_vals = [r["arm_length_cm"] for r in shot_results]
     leg_vals = [r["leg_length_cm"] for r in shot_results]
 
     shoulder_width_cm, shoulder_consistency = average_with_consistency(shoulder_vals)
     hip_width_cm, hip_consistency = average_with_consistency(hip_vals)
+    chest_width_front_cm, _ = average_with_consistency(chest_width_front_vals)
+    waist_width_front_cm, _ = average_with_consistency(waist_width_front_vals)
+    hip_width_front_cm, _ = average_with_consistency(hip_width_front_vals)
     arm_length_cm, _ = average_with_consistency(arm_vals)
     leg_length_cm, _ = average_with_consistency(leg_vals)
 
@@ -1386,13 +1495,13 @@ def page_measurements():
     hip_ratio = 0.72 if gender == "Women" else 0.68
 
     if used_real_depth:
-        chest_circumference = estimate_circumference(shoulder_width_cm, chest_depth_cm)
-        waist_circumference = estimate_circumference(hip_width_cm * 0.9, waist_depth_cm)
-        hip_circumference = estimate_circumference(hip_width_cm, hip_depth_cm)
+        chest_circumference = estimate_circumference(chest_width_front_cm, chest_depth_cm)
+        waist_circumference = estimate_circumference(waist_width_front_cm, waist_depth_cm)
+        hip_circumference = estimate_circumference(hip_width_front_cm, hip_depth_cm)
     else:
-        chest_circumference = estimate_circumference(shoulder_width_cm, shoulder_width_cm * chest_ratio)
-        waist_circumference = estimate_circumference(hip_width_cm * 0.9, hip_width_cm * 0.9 * waist_ratio)
-        hip_circumference = estimate_circumference(hip_width_cm, hip_width_cm * hip_ratio)
+        chest_circumference = estimate_circumference(chest_width_front_cm, chest_width_front_cm * chest_ratio)
+        waist_circumference = estimate_circumference(waist_width_front_cm, waist_width_front_cm * waist_ratio)
+        hip_circumference = estimate_circumference(hip_width_front_cm, hip_width_front_cm * hip_ratio)
 
     detected_size = detect_size(gender, chest_circumference, waist_circumference, hip_circumference)
     shape_name, shape_desc = detect_body_shape(gender, chest_circumference, waist_circumference, hip_circumference)
