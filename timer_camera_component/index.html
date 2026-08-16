@@ -57,6 +57,9 @@
     object-fit: cover;
     display: block;
   }
+  video.mirror {
+    transform: scaleX(-1);
+  }
   canvas { display: none; }
   .countdown-overlay {
     position: absolute;
@@ -76,13 +79,30 @@
     margin: 8px 2px 0 2px;
     min-height: 18px;
   }
+  /* Keep the primary camera controls side-by-side in localhost and
+     Streamlit Cloud. CSS grid gives both buttons explicit equal columns,
+     independent of the iframe width supplied by Streamlit. */
   .btn-row {
     margin-top: 8px;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    align-items: stretch;
   }
+
+  .btn-row button {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    box-sizing: border-box;
+    margin: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   button {
-    flex: 1;
     background: linear-gradient(135deg, #f5a9d0, #b9a7f5);
     color: white;
     border: none;
@@ -92,14 +112,17 @@
     font-size: 14px;
     cursor: pointer;
   }
+
   button:disabled {
     opacity: 0.55;
     cursor: default;
   }
+
   button.secondary {
     background: #e7e0f0;
     color: #4a3f55;
   }
+
   .label {
     font-weight: 700;
     color: #4a3f55;
@@ -119,6 +142,7 @@
     <div class="status" id="status">Requesting camera access…</div>
     <div class="btn-row">
       <button id="startBtn" disabled>Start timer & capture</button>
+      <button id="switchBtn" class="secondary" type="button">🔄 Switch camera</button>
       <button id="retakeBtn" class="secondary" style="display:none;">Retake</button>
     </div>
   </div>
@@ -146,6 +170,7 @@
   var countdownEl = document.getElementById("countdown");
   var statusEl = document.getElementById("status");
   var startBtn = document.getElementById("startBtn");
+  var switchBtn = document.getElementById("switchBtn");
   var retakeBtn = document.getElementById("retakeBtn");
   var labelEl = document.getElementById("labelText");
 
@@ -153,17 +178,44 @@
   var seconds = 3;
   var running = false;
   var initializedArgsKey = null;
+  // NEW: which physical camera to use. "user" = front/selfie camera,
+  // "environment" = rear/back camera. Defaults to front, matching the old
+  // fixed behavior, and can be flipped with the Switch camera button below.
+  var facingMode = "user";
 
   async function startCamera() {
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: "user" },
+        video: { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: facingMode },
         audio: false,
       });
       videoEl.srcObject = stream;
+      // Mirror only the front/selfie camera, like every native camera app does -
+      // the rear camera is shown un-mirrored since that's how it's actually seen.
+      videoEl.classList.toggle("mirror", facingMode === "user");
       statusEl.textContent = "Camera ready. Get in position, then start the timer.";
       startBtn.disabled = false;
     } catch (err) {
+      // If the requested camera (e.g. rear camera on a laptop with no rear
+      // camera) isn't available, fall back to whichever camera IS available
+      // instead of leaving the user stuck with a permission error.
+      if (facingMode !== "user") {
+        facingMode = "user";
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: facingMode },
+            audio: false,
+          });
+          videoEl.srcObject = stream;
+          videoEl.classList.add("mirror");
+          statusEl.textContent = "Requested camera wasn't available - switched back to front camera.";
+          startBtn.disabled = false;
+          setFrameHeight();
+          return;
+        } catch (err2) {
+          // fall through to the error message below
+        }
+      }
       statusEl.textContent = "Camera permission denied or unavailable (" + err.message + "). " +
         "Allow camera access in your browser and reload.";
       startBtn.disabled = true;
@@ -190,6 +242,7 @@
     countdownEl.textContent = "";
     statusEl.textContent = "Captured! Use Retake if you want to try again.";
     startBtn.style.display = "none";
+    switchBtn.style.display = "none";
     retakeBtn.style.display = "block";
     stopCamera();
     setFrameHeight();
@@ -200,6 +253,7 @@
     if (running) return;
     running = true;
     startBtn.disabled = true;
+    switchBtn.disabled = true;
     for (var i = seconds; i >= 1; i--) {
       countdownEl.textContent = i;
       statusEl.textContent = "Hold still…";
@@ -210,18 +264,29 @@
     running = false;
   }
 
+  async function switchCamera() {
+    if (running) return; // don't allow switching mid-countdown
+    facingMode = facingMode === "user" ? "environment" : "user";
+    stopCamera();
+    statusEl.textContent = "Switching camera…";
+    await startCamera();
+  }
+
   function retake() {
     setComponentValue(null);
     canvasEl.style.display = "none";
     videoEl.style.display = "block";
     retakeBtn.style.display = "none";
     startBtn.style.display = "block";
+    switchBtn.style.display = "block";
+    switchBtn.disabled = false;
     startBtn.disabled = true;
     statusEl.textContent = "Requesting camera access…";
     startCamera();
   }
 
   startBtn.addEventListener("click", function () { runCountdownAndCapture(); });
+  switchBtn.addEventListener("click", function () { switchCamera(); });
   retakeBtn.addEventListener("click", function () { retake(); });
 
   // ---------- Handle args coming from Python ----------
@@ -245,7 +310,19 @@
   }
 
   window.addEventListener("message", onRender);
-  window.addEventListener("resize", setFrameHeight);
+  window.addEventListener("resize", function () {
+    setFrameHeight();
+    requestAnimationFrame(setFrameHeight);
+  });
+
+  // Streamlit Cloud can finish laying out the component after the initial
+  // render, so recalculate the iframe height after the browser paints.
+  window.addEventListener("load", function () {
+    setFrameHeight();
+    requestAnimationFrame(setFrameHeight);
+    setTimeout(setFrameHeight, 100);
+    setTimeout(setFrameHeight, 500);
+  });
 
   // Explicitly release the webcam when Streamlit removes this component.
   // This is important for sequential multi-shot capture: shot 1 must fully
@@ -254,6 +331,8 @@
 
   notifyReady();
   setFrameHeight();
+  requestAnimationFrame(setFrameHeight);
+  setTimeout(setFrameHeight, 100);
 </script>
 </body>
 </html>
