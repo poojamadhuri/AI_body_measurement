@@ -537,6 +537,8 @@ def init_state():
         "otp_is_real": False,
         "otp_send_error": None,
         "feedback_log": [],
+        # SmartMeasure opening-slide flag (added; existing measurement state is unchanged)
+        "smartmeasure_intro_seen": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1580,10 +1582,175 @@ def page_measurements():
     show_feedback_section()
 
 
+
 # ============================================================
+# SMARTMEASURE OPENING SLIDE (added without changing the app logic)
+# ============================================================
+_SMARTMEASURE_DIR = os.path.dirname(os.path.abspath(__file__))
+_SMARTMEASURE_ASSETS = os.path.join(_SMARTMEASURE_DIR, "smartmeasure_assets")
+_SMARTMEASURE_LOGO_CANDIDATES = [
+    os.path.join(_SMARTMEASURE_ASSETS, "logo.png"),
+    os.path.join(_SMARTMEASURE_ASSETS, "logo.jpg"),
+    os.path.join(_SMARTMEASURE_ASSETS, "logo.jpeg"),
+    os.path.join(_SMARTMEASURE_ASSETS, "smartmeasure_logo.png"),
+    os.path.join(_SMARTMEASURE_ASSETS, "smartmeasure_logo.jpg"),
+]
+
+def _smartmeasure_logo_path():
+    for _p in _SMARTMEASURE_LOGO_CANDIDATES:
+        if os.path.exists(_p):
+            return _p
+    return None
+
+_SMARTMEASURE_CSR_LOGO = os.path.join(
+    _SMARTMEASURE_ASSETS, "csr_partner_logos.png"
+)
+
+def page_smartmeasure_intro():
+    """SmartMeasure animated opening page."""
+    bg_path = os.path.join(_SMARTMEASURE_ASSETS, "smartmeasure_logo.jpeg")
+
+    # CSR banner: support PNG/JPG/JPEG so the banner loads from the
+    # existing smartmeasure_assets folder without requiring any other
+    # Python file or configuration change.
+    _csr_candidates = [
+        os.path.join(_SMARTMEASURE_ASSETS, "csr_banner.png"),
+        os.path.join(_SMARTMEASURE_ASSETS, "csr_banner.jpg"),
+        os.path.join(_SMARTMEASURE_ASSETS, "csr_banner.jpeg"),
+        os.path.join(_SMARTMEASURE_ASSETS, "csr_partner_logos.png"),
+    ]
+    csr_path = next((p for p in _csr_candidates if os.path.exists(p)), "")
+
+    def image_uri(path):
+        if not os.path.exists(path):
+            return ""
+        ext = os.path.splitext(path)[1].lower()
+        mime = "image/png" if ext == ".png" else "image/jpeg"
+        with open(path, "rb") as f:
+            return f"data:{mime};base64," + base64.b64encode(f.read()).decode("utf-8")
+
+    bg_uri = image_uri(bg_path)
+    csr_uri = image_uri(csr_path)
+
+    st.markdown("""
+    <style>
+    #MainMenu, header, footer {visibility:hidden;}
+    .block-container {padding-top:0!important; padding-bottom:0!important; max-width:100%!important;}
+
+    .sm-page {
+        min-height:100vh; display:flex; align-items:center; justify-content:center;
+        padding:20px; box-sizing:border-box; overflow:hidden;
+        background:
+          radial-gradient(circle at 10% 15%,rgba(45,190,220,.14),transparent 28%),
+          radial-gradient(circle at 90% 80%,rgba(130,70,210,.14),transparent 30%),
+          linear-gradient(135deg,#f9fcff,#f7f4ff 52%,#f6fffb);
+    }
+
+    .sm-slide {
+        width:min(1180px,96vw); min-height:88vh; position:relative; overflow:hidden;
+        border-radius:30px; border:1px solid rgba(90,76,120,.13);
+        background:rgba(255,255,255,.84);
+        box-shadow:0 28px 80px rgba(57,44,83,.16);
+        backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+        display:flex; flex-direction:column; justify-content:space-between;
+        animation:sm-card-in .75s ease-out both;
+    }
+
+    .sm-watermark {
+        position:absolute; width:min(520px,70vw); height:min(520px,70vw);
+        left:50%; top:43%; transform:translate(-50%,-50%);
+        object-fit:contain; opacity:.12; pointer-events:none;
+        animation:sm-watermark-in 1.1s ease-out both;
+    }
+
+    .sm-content {position:relative;z-index:2;text-align:center;padding:clamp(48px,8vh,82px) 28px 18px;}
+    .sm-kicker {font-size:12px;font-weight:800;letter-spacing:.22em;color:#695d78!important;margin-bottom:12px;animation:sm-rise .7s .12s both;}
+    .sm-title {
+        margin:0!important;font-size:clamp(52px,8vw,92px)!important;line-height:.96!important;
+        font-weight:900!important;letter-spacing:-.045em!important;
+        background:linear-gradient(90deg,#173b80,#5b28a7,#0d8094);
+        -webkit-background-clip:text;background-clip:text;color:transparent!important;
+        animation:sm-rise .8s .22s both;
+    }
+    .sm-subtitle {margin-top:16px;font-size:clamp(18px,2.2vw,28px);font-weight:700;color:#343246!important;animation:sm-rise .8s .34s both;}
+    .sm-description {width:min(760px,90vw);margin:20px auto 0;font-size:clamp(14px,1.4vw,18px);line-height:1.75;color:#5d5868!important;animation:sm-rise .8s .46s both;}
+    .sm-hint {margin-top:20px;font-size:12px;color:#777080!important;animation:sm-rise .8s .58s both;}
+    .sm-footer {position:relative;z-index:3;width:100%;text-align:center;padding:0 22px 24px;animation:sm-bottom-in .9s .62s both;}
+    .sm-branding-label {color:#71677a!important;font-size:10px;font-weight:900;letter-spacing:.20em;margin-bottom:7px;}
+    .sm-csr-image {
+        display:block;width:min(1100px,96vw);max-height:125px;height:auto;
+        object-fit:contain;margin:2px auto 0;border-radius:7px;
+        animation:sm-csr-in 1s .78s both;
+    }
+    .sm-csr {margin-top:8px;color:#5d5565!important;font-size:12px;line-height:1.5;}
+    .sm-csr b {color:#393241!important;}
+
+    @keyframes sm-card-in {from{opacity:0;transform:translateY(28px) scale(.975)}to{opacity:1;transform:translateY(0) scale(1)}}
+    @keyframes sm-watermark-in {from{opacity:0;transform:translate(-50%,-50%) scale(.90)}to{opacity:.12;transform:translate(-50%,-50%) scale(1)}}
+    @keyframes sm-rise {from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes sm-bottom-in {from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes sm-csr-in {from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+
+    div[data-testid="stButton"] {display:flex;justify-content:center;position:relative;z-index:20;margin-top:-72px;margin-bottom:35px;}
+    div[data-testid="stButton"]>button {
+        border:0!important;border-radius:999px!important;padding:12px 34px!important;
+        font-size:16px!important;font-weight:800!important;color:white!important;
+        background: linear-gradient(90deg, #F8BBD0, #F48FB1) !important;
+        box-shadow:0 12px 28px rgba(69,46,133,.24)!important;
+        transition:transform .2s ease,box-shadow .2s ease!important;
+    }
+    div[data-testid="stButton"]>button:hover {transform:translateY(-2px) scale(1.02);box-shadow:0 16px 34px rgba(244,143,177,0.40)!important;}
+
+    @media(max-width:700px){
+        .sm-slide{min-height:92vh;border-radius:22px}.sm-content{padding-top:40px}
+        .sm-watermark{width:360px;height:360px;top:40%}.sm-csr-image{max-height:75px}
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    description = (
+        "SmartMeasure is an AI-based body measurement system that uses "
+        "computer vision to estimate body measurements automatically. "
+        "The system is designed to make body measurement faster, simple, "
+        "and convenient using a camera-based interface."
+    )
+
+    st.markdown(
+        f"""
+        <div class="sm-page">
+          <div class="sm-slide">
+            <img class="sm-watermark" src="{bg_uri}" alt="SmartMeasure logo">
+            <div class="sm-content">
+              <div class="sm-kicker">AI • COMPUTER VISION • BODY MEASUREMENT</div>
+              <h1 class="sm-title">SmartMeasure</h1>
+              <div class="sm-subtitle">An AI-Based Body Measurement System</div>
+              <div class="sm-description">{description}</div>
+              <div class="sm-hint">Click below to continue to the SmartMeasure application</div>
+            </div>
+            <div class="sm-footer">
+              <div class="sm-branding-label">CSR PARTNERS</div>
+              <img class="sm-csr-image" src="{csr_uri}" alt="CSR partners">
+              <div class="sm-csr">
+                CSR by <b>Microsoft</b>, <b>SAP</b>, and <b>APSSDC</b>
+                &nbsp;•&nbsp; Implemented by <b>Edunet Foundation</b>
+              </div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button("✨  Enter SmartMeasure", key="smartmeasure_intro_enter"):
+        st.session_state.smartmeasure_intro_seen = True
+        st.rerun()
+
+
 # APP ROUTER (unchanged from v3)
 # ============================================================
-if not st.session_state.logged_in:
+if not st.session_state.smartmeasure_intro_seen:
+    page_smartmeasure_intro()
+elif not st.session_state.logged_in:
     page_login()
 else:
     st.sidebar.markdown("<div class='pill'>📏 Body Measurement</div>", unsafe_allow_html=True)
